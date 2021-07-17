@@ -1,8 +1,0 @@
-{
-  "load_type_id": "texture_dict",
-  "actual_value": {
-    "textures":{
-      "bmo": "assets/images/LZBot.png"
-    }
-  }
-}
