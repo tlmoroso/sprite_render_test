@@ -1,0 +1,20 @@
+[package]
+name = "sprite_render_test"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.42"
+luminance-front = "0.4.0"
+luminance-glfw = "0.16.0"
+specs = {version = "0.17.0", features = ["specs-derive"]}
+glam = "0.17.1"
+serde = {version = "1.0", features = ["derive"]}
+serde_json = "1.0.64"
+thiserror = "1.0.26"
+luminance-windowing = "0.10.0"
+
+[dependencies.game_engine]
+path = "../../gameEngine"
