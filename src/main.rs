@@ -24,8 +24,31 @@ use thiserror::Error;
 use game_engine::game_loop::GameLoop;
 use game_engine::input::multi_input::MultiInput;
 use luminance_windowing::{WindowOpt, WindowDim};
+use tracing::{debug, trace, info};
+use tracing_appender::non_blocking;
+use tracing_subscriber::{Registry, EnvFilter};
+use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
+use tracing_subscriber::layer::SubscriberExt;
 
 fn main() {
+    // game_engine::log::init_logger().expect("Logger failed to initialize");
+    // tracing_subscriber::fmt::init();
+    let app_name = concat!(env!("CARGO_PKG_NAME"), "-", env!("CARGO_PKG_VERSION")).to_string();
+    let file_appender = tracing_appender::rolling::daily("./", "game_engine.log");
+    let (non_blocking_writer, _guard) = non_blocking(file_appender);
+
+    let bunyan_formatting_layer = BunyanFormattingLayer::new(app_name, non_blocking_writer);
+    let subscriber = Registry::default()
+        .with(EnvFilter::from_default_env())
+        .with(JsonStorageLayer)
+        .with(bunyan_formatting_layer);
+
+    tracing::subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+
+    info!("TEST INFO");
+    trace!("TEST TRACE");
+    debug!("TEST DEBUG");
+
     let game_loop: GameLoop<TestGameWrapper<MultiInput>, MultiInput> = GameLoop::new();
     game_loop.run(
     WindowOpt::default()
@@ -196,15 +219,12 @@ impl<T: 'static + Input + Debug> SceneLoader<T> for SpriteRenderSceneLoader<T> {
                 ].join(""),
                 SPRITE_RENDER_SCENE_ID
             )?;
-            eprintln!("Scene JSON: {:?}", json);
-            
+
             let entities = load_entity_vec::<Self>(&json.entity_paths).execute((ecs.clone(), context.clone()))?;
-            eprintln!("Entities: {:?}", entities);
 
             let sprite_renderer = SpriteRenderer::new(
                 context.write().expect("Failed to lock Context").deref_mut()
             );
-            eprintln!("Sprite Renderer created");
 
             Ok(Box::new(SpriteRenderScene {
                 sprite_renderer,
