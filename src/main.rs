@@ -1,40 +1,37 @@
 use game_engine::game::GameWrapper;
-use game_engine::loading::DrawTask;
+use game_engine::loading::{DrawTask, Task};
 use game_engine::scenes::scene_stack::{SceneStack, SceneStackLoader, SCENE_STACK_FILE_ID, SceneTransition};
-use game_engine::graphics::texture::{Texture, TEXTURE_LOAD_ID, TextureLoader};
+use game_engine::graphics::texture::{TEXTURE_LOAD_ID, TextureLoader, TextureHandle};
 use game_engine::graphics::transform::{Transform, TRANSFORM_LOAD_ID, TransformLoader};
-use game_engine::load::{LOAD_PATH, JSON_FILE, JSONLoad, load_entity_vec, load_deserializable_from_file};
-use game_engine::scenes::{SCENES_DIR, SceneLoader, Scene, SceneLoaderJSON};
+use game_engine::load::{LOAD_PATH, JSON_FILE, JSONLoad, load_deserializable_from_file, create_entity_vec};
+use game_engine::scenes::{SCENES_DIR, SceneLoader, Scene};
 use std::fmt::{Debug, Formatter};
 use game_engine::input::Input;
 use game_engine::globals::texture_dict::{TextureDictLoader, TEXTURE_DICT_LOAD_ID};
-use game_engine::graphics::render::sprite_renderer::{SpriteRenderer, SpriteRenderError};
-use std::ops::{DerefMut};
+use game_engine::graphics::render::sprite_renderer::{SpriteRenderer, SpriteRenderError, SpriteRendererLoader};
 use anyhow::{Result, Error};
 use luminance_glfw::GL33Context;
 use luminance_front::context::GraphicsContext;
-use luminance_front::pipeline::{PipelineState, PipelineError};
+use luminance_front::pipeline::{PipelineState};
 use glam::{Mat4, Vec3};
 use specs::{World, WorldExt};
 use serde::Deserialize;
 use game_engine::components::{ComponentMux, ComponentLoader};
 use std::marker::PhantomData;
 use luminance_front::texture::Dim2;
-use thiserror::Error;
-use game_engine::game_loop::GameLoop;
+use game_engine::game_loop::{GameLoop, GameLoopError};
 use game_engine::input::multi_input::MultiInput;
 use luminance_windowing::{WindowOpt, WindowDim};
-use tracing::{debug, trace, info};
 use tracing_appender::non_blocking;
 use tracing_subscriber::{Registry, EnvFilter};
 use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_subscriber::layer::SubscriberExt;
+use game_engine::graphics::render::Renderer;
+use std::sync::{RwLock, Arc};
 
-fn main() {
-    // game_engine::log::init_logger().expect("Logger failed to initialize");
-    // tracing_subscriber::fmt::init();
+fn main() -> Result<(), GameLoopError> {
     let app_name = concat!(env!("CARGO_PKG_NAME"), "-", env!("CARGO_PKG_VERSION")).to_string();
-    let file_appender = tracing_appender::rolling::daily("./", "game_engine.log");
+    let file_appender = tracing_appender::rolling::hourly("C:/Users/tlmor/game_engine_tests/", "game_engine.log");
     let (non_blocking_writer, _guard) = non_blocking(file_appender);
 
     let bunyan_formatting_layer = BunyanFormattingLayer::new(app_name, non_blocking_writer);
@@ -44,10 +41,6 @@ fn main() {
         .with(bunyan_formatting_layer);
 
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
-
-    info!("TEST INFO");
-    trace!("TEST TRACE");
-    debug!("TEST DEBUG");
 
     let game_loop: GameLoop<TestGameWrapper<MultiInput>, MultiInput> = GameLoop::new();
     game_loop.run(
@@ -59,7 +52,7 @@ fn main() {
             }
         ),
     "Sprite Render Test".to_string()
-    );
+    )
 }
 
 struct TestGameWrapper<T: Input + Debug> {
@@ -69,7 +62,7 @@ struct TestGameWrapper<T: Input + Debug> {
 impl<T: 'static + Input + Debug> TestGameWrapper<T> {
     fn scene_factory(json: JSONLoad) -> Result<Box<dyn SceneLoader<T>>> {
         match json.load_type_id.as_str() {
-            SPRITE_RENDER_SCENE_ID => Ok(Box::new(SpriteRenderSceneLoader::new())),
+            SPRITE_RENDER_SCENE_ID => Ok(Box::new(SpriteRenderSceneLoader::new([LOAD_PATH, SCENES_DIR, SPRITE_RENDER_SCENE_ID, JSON_FILE].join("")))),
             _ => {Err(Error::msg("Load ID did not match any scene ID"))}
         }
     }
@@ -77,7 +70,7 @@ impl<T: 'static + Input + Debug> TestGameWrapper<T> {
 
 impl<T: 'static + Input + Debug> GameWrapper<T> for TestGameWrapper<T> {
     fn register_components(ecs: &mut World) {
-        ecs.register::<Texture>();
+        ecs.register::<TextureHandle>();
         ecs.register::<Transform>();
     }
 
@@ -93,15 +86,15 @@ impl<T: 'static + Input + Debug> GameWrapper<T> for TestGameWrapper<T> {
         );
 
         let td_loader = TextureDictLoader::new(
-            &[
+            [
                 LOAD_PATH,
                 TEXTURE_DICT_LOAD_ID,
                 JSON_FILE
             ].join("")
-        ).expect("Failed to create TextureDictLoader");
+        );
 
         td_loader.load()
-            .map(|texture_dict, (ecs, context)| {
+            .map(|texture_dict, (ecs, _context)| {
                 ecs
                     .write()
                     .expect("Failed to lock World")
@@ -109,9 +102,7 @@ impl<T: 'static + Input + Debug> GameWrapper<T> for TestGameWrapper<T> {
 
                 Ok(())
             })
-            .sequence(ss_loader.load(), |(_, scene_stack)| {
-                scene_stack
-            })
+            .sequence(ss_loader.load())
     }
 }
 
@@ -131,7 +122,7 @@ impl<T: Input + Debug> Debug for SpriteRenderScene<T> {
 }
 
 impl<T: Input + Debug> Scene<T> for SpriteRenderScene<T> {
-    fn update(&mut self, ecs: &mut World) -> Result<SceneTransition<T>> {
+    fn update(&mut self, _ecs: &mut World) -> Result<SceneTransition<T>> {
         Ok(SceneTransition::NONE)
     }
 
@@ -170,7 +161,7 @@ impl<T: Input + Debug> Scene<T> for SpriteRenderScene<T> {
         Ok(())
     }
 
-    fn interact(&mut self, ecs: &mut World, input: &T) -> Result<()> {
+    fn interact(&mut self, _ecs: &mut World, _input: &T) -> Result<()> {
         Ok(())
     }
 
@@ -178,22 +169,28 @@ impl<T: Input + Debug> Scene<T> for SpriteRenderScene<T> {
         String::from("Sprite Render Test Scene")
     }
 
-    fn is_finished(&self, ecs: &mut World) -> Result<bool> {
+    fn is_finished(&self, _ecs: &mut World) -> Result<bool> {
         return Ok(false)
     }
 }
 
 #[derive(Deserialize, Debug, Clone)]
-pub struct SpriteRenderSceneJSON {}
+pub struct SpriteRenderSceneJSON {
+    entity_paths: Vec<String>
+}
 
 #[derive(Debug)]
 pub struct SpriteRenderSceneLoader<T: Input + Debug> {
+    path: String,
     phantom_input: PhantomData<T>
 }
 
 impl<T: Input + Debug> SpriteRenderSceneLoader<T> {
-    pub fn new() -> Self {
-        Self { phantom_input: Default::default() }
+    pub fn new(path: String) -> Self {
+        Self {
+            path,
+            phantom_input: Default::default()
+        }
     }
 }
 
@@ -209,27 +206,31 @@ impl<T: Input + Debug> ComponentMux for SpriteRenderSceneLoader<T> {
 
 impl<T: 'static + Input + Debug> SceneLoader<T> for SpriteRenderSceneLoader<T> {
     fn load_scene(&self) -> DrawTask<Box<dyn Scene<T>>> {
-        DrawTask::new(|(ecs, context)| {
-            let json: SceneLoaderJSON = load_deserializable_from_file(
-                &[
-                    LOAD_PATH,
-                    SCENES_DIR,
-                    SPRITE_RENDER_SCENE_ID,
-                    JSON_FILE
-                ].join(""),
-                SPRITE_RENDER_SCENE_ID
-            )?;
+        let path = self.path.clone();
 
-            let entities = load_entity_vec::<Self>(&json.entity_paths).execute((ecs.clone(), context.clone()))?;
+        SpriteRendererLoader::load_default()
+            .join(
+                DrawTask::new(move |_| {
+                    let json: SpriteRenderSceneJSON = load_deserializable_from_file(&path, SPRITE_RENDER_SCENE_ID)
+                        .map_err(|e| {
+                            Error::new(e)
+                        })?;
 
-            let sprite_renderer = SpriteRenderer::new(
-                context.write().expect("Failed to lock Context").deref_mut()
-            );
-
-            Ok(Box::new(SpriteRenderScene {
-                sprite_renderer,
-                phantom_input: Default::default()
-            }) as Box<dyn Scene<T>>)
-        })
+                    return Ok(json)
+                }),
+                |args| return args
+            )
+            .serialize(
+                Task::new(|((renderer, json),(ecs, context)): ((SpriteRenderer, SpriteRenderSceneJSON),(Arc<RwLock<World>>, Arc<RwLock<GL33Context>>))| {
+                    create_entity_vec::<Self>(&json.entity_paths, ecs, context)?;
+                    return Ok(renderer)
+                })
+            )
+            .map(|renderer, (_ecs, _context)| {
+                Ok(Box::new(SpriteRenderScene {
+                    sprite_renderer: renderer,
+                    phantom_input: Default::default()
+                }) as Box<dyn Scene<T>>)
+            })
     }
 }
