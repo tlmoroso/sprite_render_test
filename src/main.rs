@@ -28,10 +28,12 @@ use tracing_bunyan_formatter::{BunyanFormattingLayer, JsonStorageLayer};
 use tracing_subscriber::layer::SubscriberExt;
 use game_engine::graphics::render::Renderer;
 use std::sync::{RwLock, Arc};
+use game_engine::camera::orthographic_camera::{OrthographicCameraLoader, ORTHOGRAPHIC_CAMERA_LOAD_ID};
+use game_engine::camera::Camera;
 
 fn main() -> Result<(), GameLoopError> {
     let app_name = concat!(env!("CARGO_PKG_NAME"), "-", env!("CARGO_PKG_VERSION")).to_string();
-    let file_appender = tracing_appender::rolling::hourly("C:/Users/tlmor/game_engine_tests/", "game_engine.log");
+    let file_appender = tracing_appender::rolling::never("C:/Users/tlmor/game_engine_tests/", "game_engine.log");
     let (non_blocking_writer, _guard) = non_blocking(file_appender);
 
     let bunyan_formatting_layer = BunyanFormattingLayer::new(app_name, non_blocking_writer);
@@ -75,6 +77,12 @@ impl<T: 'static + Input + Debug> GameWrapper<T> for TestGameWrapper<T> {
     }
 
     fn load() -> DrawTask<SceneStack<T>> {
+        // println!("{:?}", Mat4::look_at_rh(
+        //     Vec3::new(0.0,0.0,1.0),
+        //     Vec3::new(0.0,0.0,0.0),
+        //     Vec3::Y
+        // ));
+
         let ss_loader = SceneStackLoader::new(
             [
                 LOAD_PATH,
@@ -93,7 +101,15 @@ impl<T: 'static + Input + Debug> GameWrapper<T> for TestGameWrapper<T> {
             ].join("")
         );
 
-        td_loader.load()
+        let camera_loader = OrthographicCameraLoader::new(
+            [
+                LOAD_PATH,
+                ORTHOGRAPHIC_CAMERA_LOAD_ID,
+                JSON_FILE
+            ].join("")
+        );
+
+        let td_task = td_loader.load()
             .map(|texture_dict, (ecs, _context)| {
                 ecs
                     .write()
@@ -101,7 +117,18 @@ impl<T: 'static + Input + Debug> GameWrapper<T> for TestGameWrapper<T> {
                     .insert(texture_dict);
 
                 Ok(())
-            })
+            });
+
+        let camera_task = camera_loader.load()
+            .map(|camera, (ecs, _)| {
+                ecs.write()
+                    .expect("Failed to acquire write lock for World")
+                    .insert(Some(Box::new(camera) as Box<dyn Camera>));
+
+                Ok(())
+            });
+
+        td_task.join(camera_task, |_| {})
             .sequence(ss_loader.load())
     }
 }
@@ -146,13 +173,8 @@ impl<T: Input + Debug> Scene<T> for SpriteRenderScene<T> {
                             -1.0,
                             10.0
                         ),
-                        &Mat4::look_at_rh(
-                            Vec3::new(0.0, 0.0, 1.0),
-                            Vec3::new(0.0, 0.0, 0.0),
-                            Vec3::Y
-                        ),
                 ecs
-                    )?;
+                    ).unwrap();
 
                     Ok(())
                 }
